@@ -587,7 +587,6 @@
 - [bbolinger/snapmaker-u1-toolkit](https://github.com/bbolinger/snapmaker-u1-toolkit) - 通过 Telegram 在手机上向 Snapmaker U1 发起打印的工具包，含无头 OrcaSlicer、Moonraker 上传、摄像头确认和人工批准开打，另附切片自动化 skill。(★20 · 2026-09)
 - [estampo/estampo](https://github.com/estampo/estampo) - 可复现 3D 打印的构建系统，附带 skill：配置 estampo.toml、选择切片引擎与配置，并为 STL、STEP、3MF 或代码 CAD 输出运行打印流水线。(★16 · 2026-08)
 - [CarlosZiegler/bambu-h2c-skills](https://github.com/CarlosZiegler/bambu-h2c-skills) - 面向 Bambu Lab H2C 的 skill：在 Bambu Studio 中切片并校验项目（含 AMS 与喷嘴映射）、执行已授权的打印、FDM 打印前检查、打印故障排查以及准备 Blender 模型。(coll · ★2 · 2026-09)
-- [Ethan2298/bambu-printer-agent-plugin](https://github.com/Ethan2298/bambu-printer-agent-plugin) - 在 Mac 本地运行的 agent 插件，封装 bambu-printer-mcp，并附带检查和控制 Bambu Lab A1 打印机的 skill。(★0 · 2026-09)
 - [phoenixjyb/openclaw-3dprint](https://github.com/phoenixjyb/openclaw-3dprint) - OpenClaw skill，实现文字到 3D 打印的流水线，把聊天消息变成 Bambu Lab 打印机上的实物。(★3 · 2026-03)
 - [Flatsher/elegoo-centauri-skill](https://github.com/Flatsher/elegoo-centauri-skill) - 通过 SDCP WebSocket 协议控制和监控 Elegoo Centauri Carbon 3D 打印机的 skill：状态、温度、文件、打印控制、风扇、灯光、移轴和上传。(★0 · 2026-04)
 - [danthi123/Q1Libre `.claude/skills/`](https://github.com/danthi123/Q1Libre/tree/main/.claude/skills) - Qidi Q1 Pro 的开源固件补丁，附带 Claude Code skill：通过 USB 部署、给 Klipper 打补丁、诊断打印机和发布版本。(coll · ★7 · 2026-07)
