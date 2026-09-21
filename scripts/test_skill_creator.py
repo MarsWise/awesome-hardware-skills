@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import filecmp
+import os
 import subprocess
 import sys
 import tempfile
@@ -14,9 +15,50 @@ SK = ROOT / "skills" / "hardware-skill-creator"
 S = SK / "scripts"
 failures = 0
 
+# A stand-in for pyserial, so `bench.py capture` can be tested without real hardware. Ticks once
+# `open()` has been called; every 4th `read()` returns a line, so timing is fast and deterministic.
+FAKE_SERIAL = '''
+import time
 
-def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=cwd)
+class SerialException(Exception):
+    pass
+
+class Serial:
+    def __init__(self):
+        self.port = self.baudrate = self.timeout = None
+        self._dtr = self._rts = False
+        self._t0 = None
+        self._n = 0
+
+    @property
+    def dtr(self): return self._dtr
+    @dtr.setter
+    def dtr(self, v): self._dtr = v
+    @property
+    def rts(self): return self._rts
+    @rts.setter
+    def rts(self, v): self._rts = v
+
+    def open(self):
+        self._t0 = time.time()
+
+    def read(self, n):
+        time.sleep(0.02)
+        if self._t0 is not None:
+            self._n += 1
+            if self._n % 4 == 0:
+                return f"tick {self._n}\\n".encode()
+        return b""
+
+    def close(self):
+        pass
+'''
+
+
+def run(*args: str, cwd: Path | None = None, env: dict | None = None,
+        stdin_input: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, *args], capture_output=True, text=True, cwd=cwd,
+                           env=env, input=stdin_input, timeout=30)
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -148,6 +190,53 @@ def main() -> int:
             r = run(str(S / "bench.py"), "serial", str(t / f"{name}.log"), str(t / "task.yaml"),
                     "--manifest", str(t / "m.yaml"), "--action-at", "5,8")
             check(f"bench serial: {name} log -> exit {expected[name]}", r.returncode == expected[name], r.stdout + r.stderr)
+
+        # bench.py serial reads human_action marks from the log automatically, and an explicit
+        # --action-at still overrides them (e.g. to re-score someone else's capture).
+        marked_log = t / "marked.log"
+        marked_log.write_text(
+            "# time_zero 100.0\n"
+            "100.06\trst:0x1 (POWERON)\n"
+            "100.5\ttick before\n"
+            "# human_action 105.0 button\n"
+            "106.0\ttick after\n"
+        )
+        mark_task = t / "mark-task.yaml"
+        mark_task.write_text(textwrap.dedent("""\
+            id: x
+            assertions:
+              - {type: serial_match, pattern: 'tick after', min_matches: 1, within_s: 20, after_human_action: true}
+              - {type: serial_match, pattern: 'tick before', min_matches: 1, within_s: 20, after_human_action: true}
+            """))
+        r = run(str(S / "bench.py"), "serial", str(marked_log), str(mark_task), "--manifest", str(t / "m.yaml"))
+        check("bench serial derives action_at from a log mark when --action-at is not given",
+              "action_at from log marks: 5.00s" in r.stdout
+              and "assertion[0] serial_match 'tick after': pass" in r.stdout  # at rel +6s, after the +5s mark
+              and "assertion[1] serial_match 'tick before': FAIL" in r.stdout  # at rel +0.5s, before the mark
+              and r.returncode == 1, r.stdout + r.stderr)
+        r = run(str(S / "bench.py"), "serial", str(marked_log), str(mark_task), "--manifest", str(t / "m.yaml"),
+                "--action-at", "0")
+        check("explicit --action-at overrides a log mark", r.returncode == 0, r.stdout + r.stderr)
+
+        # bench.py capture --mark-action: a tester's Enter presses (with an optional label) become
+        # real-time # human_action log lines, and the marker thread never blocks process exit.
+        fake_serial_dir = t / "fake_pyserial"
+        (fake_serial_dir).mkdir()
+        (fake_serial_dir / "serial.py").write_text(FAKE_SERIAL)
+        fake_env = {**os.environ, "PYTHONPATH": str(fake_serial_dir)}
+        cap_log = t / "cap.log"
+        r = run(str(S / "bench.py"), "capture", "--port", "fake", "--baud", "115200", "--seconds", "1",
+                "--out", str(cap_log), "--reset", "rts", "--mark-action",
+                env=fake_env, stdin_input="button\n")
+        check("capture --mark-action writes a labelled human_action mark and exits cleanly",
+              r.returncode == 0 and "# human_action" in cap_log.read_text() and "button" in cap_log.read_text()
+              and "Fatal Python error" not in r.stderr, r.stdout + r.stderr)
+        cap_log2 = t / "cap-noinput.log"
+        r = run(str(S / "bench.py"), "capture", "--port", "fake", "--baud", "115200", "--seconds", "1",
+                "--out", str(cap_log2), "--reset", "rts", "--mark-action", env=fake_env, stdin_input="")
+        check("capture --mark-action with immediately-closed stdin exits cleanly with no marks",
+              r.returncode == 0 and "# human_action" not in cap_log2.read_text()
+              and "Fatal Python error" not in r.stderr, r.stdout + r.stderr)
 
         (t / "inst").mkdir()
         r = run(str(S / "bench.py"), "install", str(SK), str(t / "inst"))

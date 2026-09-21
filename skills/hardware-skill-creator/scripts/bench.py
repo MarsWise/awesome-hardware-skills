@@ -4,17 +4,25 @@
   bench.py install <skill-dir> <dest-parent>   copy the skill WITHOUT evals/ and .git, print its tree hash
   bench.py hash <dir>                          SHA-256 of a directory tree (paths + contents, sorted)
   bench.py freeze <workdir> <out.tar.gz>       archive the agent's working directory, print both hashes
-  bench.py capture --port P --baud B --seconds S --out LOG [--reset rts]
+  bench.py capture --port P --baud B --seconds S --out LOG [--reset rts] [--mark-action]
                                                log serial lines with host timestamps; time zero is written
                                                first. --reset rts pulses RTS the way esptool's hard reset
                                                does (EN low on ESP32 dev boards with the auto-reset circuit).
                                                Without it, press Enter and then reset the board by hand;
-                                               time zero is the Enter, so windows err on the strict side. Needs pyserial.
+                                               time zero is the Enter, so windows err on the strict side.
+                                               --mark-action lets the tester press Enter at the moment they
+                                               do the task's human_action (a button, a touch, a switch) —
+                                               the real timestamp is logged, so no one has to guess a delay
+                                               or react to a cue in time. Press it again for each further
+                                               action; each press may be followed by a short label. Needs
+                                               pyserial.
   bench.py serial <LOG> <task.yaml> [--manifest manifest.yaml] [--action-at S[,S...]]
                                                evaluate the task's serial_match assertions and the reboot
-                                               guard against a captured log
+                                               guard against a captured log. Without --action-at, uses any
+                                               human_action marks recorded in the log by `capture --mark-action`.
 
-Log format: a first line '# time_zero <unix seconds>', then '<unix seconds>\\t<line>' per line.
+Log format: a first line '# time_zero <unix seconds>', then '<unix seconds>\\t<line>' per line, plus optional
+'# human_action <unix seconds> <label>' lines marking when the tester performed a physical action.
 """
 from __future__ import annotations
 
@@ -22,9 +30,11 @@ import argparse
 import hashlib
 import os
 import re
+import select
 import shutil
 import sys
 import tarfile
+import threading
 import time
 from pathlib import Path
 
@@ -79,6 +89,33 @@ def cmd_freeze(a) -> int:
     return 0
 
 
+def _mark_action_thread(out, lock, t0: float, stop: threading.Event) -> None:
+    """Reads Enter presses (each optionally followed by a short label) from stdin and logs the real
+    timestamp of each one. Polls with a short timeout, rather than blocking in input(), so it notices
+    `stop` promptly and never holds stdin's lock across interpreter shutdown. Exits quietly on EOF or on
+    a platform/redirect where stdin cannot be polled this way."""
+    n = 0
+    while not stop.is_set():
+        try:
+            ready, _, _ = select.select([sys.stdin], [], [], 0.2)
+        except (OSError, ValueError):
+            return  # stdin not selectable here; marking silently unavailable rather than blocking forever
+        if not ready:
+            continue
+        line = sys.stdin.readline()
+        if line == "":  # EOF: piped/closed stdin
+            return
+        if stop.is_set():
+            return
+        ts = time.time()
+        n += 1
+        label = line.strip()
+        with lock:
+            out.write(f"# human_action {ts:.3f} {label or f'mark {n}'}\n")
+            out.flush()
+        print(f"marked action {n} at +{ts - t0:.2f}s", file=sys.stderr)
+
+
 def cmd_capture(a) -> int:
     try:
         import serial  # type: ignore
@@ -101,6 +138,14 @@ def cmd_capture(a) -> int:
         input("Press Enter, then immediately press and release the board's reset button... ")
         t0 = time.time()
     out.write(f"# time_zero {t0:.3f}\n")
+    lock = threading.Lock()
+    stop = threading.Event()
+    marker = None
+    if a.mark_action:
+        print("Press Enter (then Enter again) the instant you perform the task's human_action; "
+              "repeat for each further action. A short label is optional, e.g. 'button' <Enter>.", file=sys.stderr)
+        marker = threading.Thread(target=_mark_action_thread, args=(out, lock, t0, stop), daemon=True)
+        marker.start()
     buf = b""
     try:
         while time.time() - t0 < a.seconds:
@@ -110,25 +155,33 @@ def cmd_capture(a) -> int:
             buf += chunk
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
-                out.write(f"{time.time():.3f}\t{line.decode('utf-8', 'replace').rstrip(chr(13))}\n")
-                out.flush()
+                with lock:
+                    out.write(f"{time.time():.3f}\t{line.decode('utf-8', 'replace').rstrip(chr(13))}\n")
+                    out.flush()
     except serial.SerialException as e:
-        out.write(f"# port error at +{time.time() - t0:.3f}s: {e}\n")
+        with lock:
+            out.write(f"# port error at +{time.time() - t0:.3f}s: {e}\n")
         print(f"port lost ({e}); on native USB this is a re-enumeration and counts as a reboot", file=sys.stderr)
     finally:
+        stop.set()
+        if marker is not None:
+            marker.join(timeout=1.0)  # polls at 0.2s, so this returns well before shutdown
         if buf:
-            out.write(f"{time.time():.3f}\t{buf.decode('utf-8', 'replace')}\n")
+            with lock:
+                out.write(f"{time.time():.3f}\t{buf.decode('utf-8', 'replace')}\n")
         out.close()
         s.close()
     print(f"wrote {a.out}; now read the chip ID on the same port within 10 s, without unplugging")
     return 0
 
 
-def read_log(path: Path) -> tuple[float, list[tuple[float, str]], list[str]]:
-    t0, lines, notes = None, [], []
+def read_log(path: Path) -> tuple[float, list[tuple[float, str]], list[str], list[float]]:
+    t0, lines, notes, marks = None, [], [], []
     for raw in path.read_text().splitlines():
         if raw.startswith("# time_zero "):
             t0 = float(raw.split()[2])
+        elif raw.startswith("# human_action "):
+            marks.append(float(raw.split()[2]))
         elif raw.startswith("#"):
             notes.append(raw)
         elif "\t" in raw:
@@ -136,11 +189,14 @@ def read_log(path: Path) -> tuple[float, list[tuple[float, str]], list[str]]:
             lines.append((float(ts), text))
     if t0 is None:
         raise SystemExit(f"{path}: no '# time_zero' line")
-    return t0, lines, notes
+    return t0, lines, notes, marks
 
 
 def cmd_serial(a) -> int:
-    t0, lines, notes = read_log(Path(a.log))
+    t0, lines, notes, marks = read_log(Path(a.log))
+    if a.action_at is None and marks:
+        a.action_at = sorted(m - t0 for m in marks)
+        print(f"action_at from log marks: {', '.join(f'{x:.2f}' for x in a.action_at)}s")
     task = yaml.safe_load(Path(a.task).read_text()) or {}
     manifest = yaml.safe_load(Path(a.manifest).read_text()) if a.manifest else {}
     patterns = (manifest or {}).get("reboot_patterns") or []
@@ -207,7 +263,10 @@ def main() -> int:
     p = sub.add_parser("capture")
     p.add_argument("--port", required=True); p.add_argument("--baud", type=int, default=115200)
     p.add_argument("--seconds", type=float, required=True); p.add_argument("--out", required=True)
-    p.add_argument("--reset", choices=["rts", "manual"], default="manual"); p.set_defaults(f=cmd_capture)
+    p.add_argument("--reset", choices=["rts", "manual"], default="manual")
+    p.add_argument("--mark-action", action="store_true",
+                   help="let the tester press Enter at the moment of each human_action; timestamps go in the log")
+    p.set_defaults(f=cmd_capture)
     p = sub.add_parser("serial")
     p.add_argument("log"); p.add_argument("task"); p.add_argument("--manifest")
     p.add_argument("--action-at", type=lambda v: [float(x) for x in v.split(",")],

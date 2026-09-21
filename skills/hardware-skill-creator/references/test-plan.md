@@ -98,8 +98,10 @@ the run that burned it fails and the board is retired.
 6. **Freeze**: `bench.py freeze <workdir> run-NN.tar.gz`; hash the installed skill again.
 7. **Build** the frozen copy with `build.cmd`. If it fails, `compile_only` fails, the rest are `not-run`.
 8. **Flash**: erase, then `flash.cmd`. Keep the output lines that show the detected chip and its ID.
-9. **Observe**: start every capture before releasing reset. Time zero = reset released. Do each `human_action`
-   at its stated time and log it.
+9. **Observe**: start every capture with `bench.py capture --mark-action` before releasing reset. Time zero =
+   reset released. Do each `human_action`, pressing Enter at the instant you act rather than aiming for its
+   stated offset — a solo tester cannot reliably hit a pre-computed time, and `bench.py serial` reads the real
+   mark from the log on its own.
 10. **Decide validity from bench evidence alone, before reading any assertion result.**
 11. Evaluate each assertion; keep raw evidence (`serial.log`, `.sr`, `.pcapng`).
 12. Record `pass` / `fail` / `not-run` per assertion; one `failure_class` for a failed run:

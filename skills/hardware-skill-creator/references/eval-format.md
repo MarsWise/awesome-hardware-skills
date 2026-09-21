@@ -86,8 +86,13 @@ Fields: `baud`, `pattern` (Python regex, searched per line), `min_matches`, `wit
 - `after_human_action: true` makes it a control-window assertion: any match before the human action fails it.
   Use it on the output the action is meant to trigger, so firmware that prints without the stimulus is caught.
 - Within 10 s after the window closes, read the chip ID on the same port without unplugging.
-- `bench.py serial LOG TASK --manifest MANIFEST [--action-at 5,8,11]` evaluates these and the reboot guard; the
-  control window ends at the first action.
+- `bench.py serial LOG TASK --manifest MANIFEST` evaluates these and the reboot guard; the control window ends at
+  the first action. Get the action time from the tester's own real-time mark, not a pre-computed offset: capture
+  with `--mark-action` and have the tester press Enter (an optional short label after it, e.g. `button`) at the
+  instant they act. Only a script driving the actuator itself can hit a `--action-at S[,S...]` on time; a solo
+  human tester cannot reliably synchronise a physical press to someone else's clock, a countdown, or a cue they
+  might not even notice. `bench.py serial` reads marks from the log automatically; pass `--action-at` explicitly
+  only to override them or to re-score a capture someone else made.
 
 ### gpio_state
 

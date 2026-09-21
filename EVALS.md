@@ -304,8 +304,12 @@ eFuse bits cannot be cleared.
    chip and its unique ID.
 9. **Observe.** Start every capture before releasing reset. **Time zero** is the moment reset is released and the
    new firmware begins to run; every `within_s` window is measured from there. Serial is captured from time zero
-   until the longest window closes, for the reboot guard below. Carry out any `human_action` the task defines, at
-   the time it defines, and log the timestamp.
+   until the longest window closes, for the reboot guard below. Carry out any `human_action` the task defines, and
+   record the real moment it happened rather than aiming for its stated offset — a lone tester cannot reliably
+   synchronise a physical press to a script's clock, a countdown, or a cue they might miss, and a run whose action
+   arrived late or early is still valid evidence as long as its actual time is what gets checked. The reference
+   implementation in `hardware-skill-creator`'s `bench.py capture --mark-action` lets the tester press Enter at
+   the instant of each action and reads that mark back automatically.
 10. **Decide whether the run is valid** from bench evidence alone — before reading any assertion result.
 11. **Evaluate each assertion** using the methods in the next section, and keep its raw evidence file.
 12. **Record the result.** Each assertion is `pass`, `fail` or `not-run`. The run passes only if every assertion
