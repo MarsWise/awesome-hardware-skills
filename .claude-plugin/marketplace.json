@@ -11,9 +11,29 @@
       "description": "Create or improve an Agent Skill for a board, SDK or instrument, with an eval package proven on the physical board: tasks with observable assertions, reference/broken/spoof fixtures, Phase 0, bench runs, L2 attestation and ΔPass.",
       "source": "./",
       "strict": false,
-      "skills": ["./skills/hardware-skill-creator"],
+      "skills": [
+        "./skills/hardware-skill-creator"
+      ],
       "category": "development",
       "homepage": "https://github.com/chopinfeng/awesome-hardware-skills/tree/main/skills/hardware-skill-creator"
+    },
+    {
+      "name": "cad-eda-toolchains",
+      "description": "Portable agent skills for Altium, CST, HFSS, SystemVue, AWR, KiCad, SOLIDWORKS and FreeCAD with native automation guidance and verification gates.",
+      "source": "./",
+      "strict": false,
+      "skills": [
+        "./skills/altium-designer",
+        "./skills/cst-studio-suite",
+        "./skills/ansys-hfss",
+        "./skills/keysight-systemvue",
+        "./skills/cadence-awr",
+        "./skills/kicad-pcb",
+        "./skills/solidworks-cad",
+        "./skills/freecad-cad"
+      ],
+      "category": "development",
+      "homepage": "https://github.com/MarsWise/awesome-hardware-skills/blob/main/docs/CAD_EDA_SKILLS.md"
     }
   ]
 }
